@@ -1,0 +1,10 @@
+This was a tough one to get to work with Haskell. Apparently pretty much all of the OpenCV Haskell bindings
+are broken/half-implemented, so I had to create my own with FFI.
+
+As usual, I have provided a statically linked binary just in case.
+
+This project took me about 8 to 10 hours to complete.
+
+make with make
+run with
+    ./jora2470_hw7
