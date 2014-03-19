@@ -126,7 +126,7 @@ void main() {
          * a function of time to simulate twinkling */
         tmpcolor *= mix(
             vec4(cmp.r*2.0,min(cmp.g,cmp.r)*1.5,min(cmp.b,cmp.r),1.0),
-            vec4(cmp2.r*2.0,min(cmp2.g,cmp2.r)*1.5,min(cmp2.b,cmp2.r),1.0), (sin(time*cmp2.a+cmp.a)+1.0)/2.0 ) ;
+            vec4(2.0,2.0,2.0,2.0), sin(time/10.0+cmp.a*27.3) ) ;
         tmpcolor -= cloudsColor;
     }
 

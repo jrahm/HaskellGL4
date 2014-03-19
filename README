@@ -1,10 +1,44 @@
-This was a tough one to get to work with Haskell. Apparently pretty much all of the OpenCV Haskell bindings
-are broken/half-implemented, so I had to create my own with FFI.
+This was a long assignment mostly because I decided to learn vertex buffers
+once and for all. This project is 100% delicious Haskell goodness with 0% fixed
+pipeline. Everything is OpenGL 4 complient right down to using only triangles,
+which means I had all kinds of fun reinventing the wheel reimplementing vector
+math and looking up algorithms for creating a lookat matrix using GLM as a
+reference.
 
-As usual, I have provided a statically linked binary just in case.
+I honestly would not be entirely surprised if I am one of the only people to
+actually have accomplished this. Not sure if this is a good thing or a bad
+thing, but whatever it is, I managed to put together a proof of concept.
 
-This project took me about 8 to 10 hours to complete.
+The good news is that I know not only understand how vertex buffers work, but I
+also understand OpenGL much better than I used to. Once I got simple lighting
+to work, this project was quite a bit of fun.
 
-make with make
+This project is a mimic of the Blue Marble example, except with some
+adjustments. First, the moon is in the scene as a test to see if I could make
+another object in the scene easily. Both the Earth and the Moon are bump
+mapped, correctly I think. I pass in a random texture to add randomness to the
+shader for when I decide when to turn on and off lights.
+
+The earth has clouds which rotate faster than the Earth itself so they appear
+to be above the surface.  The clouds also cast shadows on to the earth (fixed
+offset, not actually calculated based on the light vector  :-( ) And when the
+shadows appear over land, there is a random chance that a light may turn on,
+after all, people turn on lights during a storm.
+
+I also use the noise texture to have each light alternate between two colors
+to give the appearance of twinkling.
+
+I realize the background texture does not move with the camera, this is by
+design. I wanted to try to draw a scene with a completely different model view
+matrix and projection matrix in the same rendering. It worked.
+
+To compile run make,
 run with
-    ./jora2470_hw7
+./jora2470_hw8
+
+Controls:
+
+UP/DOWN/LEFT/RIGHT: Move camera around center
+w/s: zoom in and out.
+n: change to random bump map
+=/-: speed up/slow down time

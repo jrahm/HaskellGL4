@@ -99,20 +99,20 @@ compilingBuilder (Builder lst _) = do
                     where (?) True = 1
                           (?) False = 0
     --             Cur color normal texture buffer
-    let (_,_,_,buffer) =
-         Fold.foldl (\(cn,cc,ct,ll) ele ->
+    let (nverts,_,_,_,buffer) =
+         Fold.foldl (\(num,cn,cc,ct,ll) ele ->
                     -- trace ("foldl " ++! ele) $
                     case ele of
-                        NormalLink nn -> (nn,cc,ct,ll)
-                        ColorLink nc -> (cn,nc,ct,ll)
-                        TextureLink nt -> (cn,cc,nt,ll)
+                        NormalLink nn -> (num,nn,cc,ct,ll)
+                        ColorLink nc -> (num,cn,nc,ct,ll)
+                        TextureLink nt -> (num,cn,cc,nt,ll)
                         VertexLink vert ->
-                         (cn,cc,ct,
+                         (num+1,cn,cc,ct,
                             ll >< (tp3 True vert >< tp3 bn cn >< tp4 bc cc >< tp2 bt ct)
-                            )) ( (0,0,0), (0,0,0,0), (0,0), Seq.empty ) (Seq.reverse lst)
+                            )) ( 0, (0,0,0), (0,0,0,0), (0,0), Seq.empty ) (Seq.reverse lst)
 
     arr <- newListArray (0,Seq.length buffer) (Fold.toList buffer)
-    ((putStrLn.("Compiled: "++!))>&>return) $ CompiledBuild stride en (Seq.length buffer `div` stride * sizeof) arr
+    ((putStrLn.("Compiled: "++!))>&>return) $ CompiledBuild stride en nverts arr
 
                 
     where

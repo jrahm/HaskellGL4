@@ -93,7 +93,7 @@ instance Drawable (GlyphObject a) where
             vertexAttribPointer attr $= (ToFloat, ad)
             vertexAttribArray attr $= Enabled
 
-        drawArrays Quads 0 (bufferLength co)
+        drawArrays Triangles 0 (bufferLength co)
             
         forM_ enabled $ \(attr, _) -> do
             vertexAttribArray attr $= Disabled
@@ -202,20 +202,22 @@ loadBackdropProgram = do
 
 quad :: Builder GLfloat ()
 quad = do
-    forM_ [
-            (-1,-1,0.0),
-            (-1, 1,0.0),
-            ( 1, 1,0.0),
-            ( 1,-1,0.0)
-        ] $ \(a,b,c) -> do
-              bVertex3 (a,b,c)
+    let lst = [ (-1,-1,0.0),
+                (-1, 1,0.0),
+                ( 1, 1,0.0) ]
+    let neg (a,b,c) = (-a,-b,-c)
+
+    forM_ lst bVertex3
+    forM_ lst (bVertex3.neg)
+
 
 circle :: GLfloat -> GLfloat -> Builder GLfloat ()
 circle r step = do
-    let lst = concat [[(r,th-step,ph-step),
-                       (r,th+step,ph-step),
-                       (r,th+step,ph+step),
-                       (r,th-step,ph+step)]
+    let fromQuad (a,b,c,d) = [a,b,c,b,c,d]
+    let lst = concat [fromQuad ((r,th-step,ph-step),
+                                (r,th+step,ph-step),
+                                (r,th+step,ph+step),
+                                (r,th-step,ph+step))
                        | th <- [0,step..359-step],
                          ph <- [-90,-90+step..89-step]]
     mapM_ ( doUv >&> ((bNormal3 >&> bVertex3) . toEuclidian) ) lst
