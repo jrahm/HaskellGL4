@@ -1,7 +1,9 @@
 #version 150
-in vec3 in_position ;
-in vec3 in_normal ;
-in vec2 in_texMapping ;
+#extension GL_ARB_explicit_attrib_location : enable
+
+layout(location = 0) in vec3 in_position ;
+layout(location = 1) in vec3 in_normal ;
+layout(location = 3) in vec2 in_texMapping ;
 
 uniform mat4 mvMat ;
 uniform mat4 pMat ;

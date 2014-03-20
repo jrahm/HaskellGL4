@@ -88,7 +88,7 @@ compilingBuilder (Builder lst _) = do
                         tmp _ = 0
     {- Simply figure out what types of elementse
      - exist in this buffer -}
-    let en@(bn,bc,bt) = Fold.foldl (\(bn,bc,bt) ele ->
+    let en@(bn,bc,bt) = Fold.foldl' (\(bn,bc,bt) ele ->
                                 case ele of
                                     NormalLink _ -> (True,bc,bt)
                                     ColorLink _ -> (bn,True,bt)
@@ -100,8 +100,8 @@ compilingBuilder (Builder lst _) = do
                           (?) False = 0
     --             Cur color normal texture buffer
     let (nverts,_,_,_,buffer) =
-         Fold.foldl (\(num,cn,cc,ct,ll) ele ->
-                    -- trace ("foldl " ++! ele) $
+         Fold.foldl' (\(num,cn,cc,ct,ll) ele ->
+                   -- trace ("foldl " ++! ele) $
                     case ele of
                         NormalLink nn -> (num,nn,cc,ct,ll)
                         ColorLink nc -> (num,cn,nc,ct,ll)
@@ -111,19 +111,19 @@ compilingBuilder (Builder lst _) = do
                             ll >< (tp3 True vert >< tp3 bn cn >< tp4 bc cc >< tp2 bt ct)
                             )) ( 0, (0,0,0), (0,0,0,0), (0,0), Seq.empty ) (Seq.reverse lst)
 
-    arr <- newListArray (0,Seq.length buffer) (Fold.toList buffer)
-    ((putStrLn.("Compiled: "++!))>&>return) $ CompiledBuild stride en nverts arr
-
-                
-    where
-        tp2 True (a,b)  = Seq.fromList [a,b]
-        tp2 False _  = empty
-
-        tp3 True (a,b,c) = Seq.fromList [a,b,c]
-        tp3 False _ = empty
-
-        tp4 True (a,b,c,d) = Seq.fromList [a,b,c,d]
-        tp4 False _ = empty
+    let blst = (Fold.toList buffer)
+    arr <- blst `seq` newListArray (0,Seq.length buffer) blst
+    let compiledRet = CompiledBuild stride en nverts arr
+    compiledRet `seq` putStrLn ("Compiled: " ++! compiledRet ) `seq` return compiledRet
+  where
+      tp2 True (a,b)  = Seq.fromList [a,b]
+      tp2 False _  = empty
+ 
+      tp3 True (a,b,c) = Seq.fromList [a,b,c]
+      tp3 False _ = empty
+ 
+      tp4 True (a,b,c,d) = Seq.fromList [a,b,c,d]
+      tp4 False _ = empty
 
 storableArrayToBuffer :: (Storable el) => BufferTarget -> StorableArray Int el -> IO BufferObject
 storableArrayToBuffer target arr = do

@@ -3,6 +3,9 @@ module Graphics.Glyph.Util where
 import Data.Angle
 import Graphics.Rendering.OpenGL
 
+int :: (Integral a, Num b) => a -> b
+int = fromIntegral 
+
 uncurry7 :: (a -> b -> c -> d -> e -> f -> g -> h) -> (a,b,c,d,e,f,g) -> h
 uncurry7 func (a,b,c,d,e,f,g) = func a b c d e f g
 

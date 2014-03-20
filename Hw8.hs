@@ -3,6 +3,7 @@ module Main where
 
 import Control.Applicative
 import Control.Monad
+import GHC.Exts
 
 import Data.Setters
 import Data.Maybe
@@ -10,7 +11,7 @@ import Data.Word
 
 import Debug.Trace
 
-import Graphics.Rendering.OpenGL
+import Graphics.Rendering.OpenGL as GL
 import Graphics.Rendering.OpenGL.Raw.Core31
 import Graphics.UI.SDL as SDL
 import Graphics.Glyph.GLMath
@@ -21,6 +22,7 @@ import Graphics.Glyph.Textures
 import Graphics.Glyph.Shaders
 import Graphics.Glyph.Util
 import Graphics.Glyph.BufferBuilder
+import Graphics.Glyph.GlyphObject
 
 import Control.DeepSeq
 import System.Exit
@@ -30,79 +32,6 @@ import Debug.Trace
 import Foreign.Storable
 import Foreign.Ptr
 
-class Drawable a where
-    -- mvMat -> pMat -> obj -> IO ()
-    draw :: a -> IO ()
-
-data GlyphObject a = GlyphObject {
-    bufferObject :: BufferObject, -- buffer
-    compiledData :: (CompiledBuild GLfloat), -- compiled data
-    vertexAttribute :: AttribLocation, -- vertex attribute
-    normalAttribute :: (Maybe AttribLocation), -- normal attrib
-    colorAttribute  :: (Maybe AttribLocation), -- color attrib
-    textureAttribute :: (Maybe AttribLocation), -- texture attrib
-    resources :: a, -- Resources
-    setupRoutine :: (Maybe (GlyphObject a -> IO ())), -- Setup
-    teardownRoutine :: (Maybe (GlyphObject a -> IO ())) -- Tear down
-}
-
-$(declareSetters ''GlyphObject)
-makeGlyphObject :: Builder GLfloat x ->
-    AttribLocation ->
-    Maybe AttribLocation ->
-    Maybe AttribLocation ->
-    Maybe AttribLocation ->
-    a ->
-    Maybe (GlyphObject a -> IO ()) ->
-    Maybe (GlyphObject a -> IO ()) ->
-    IO (GlyphObject a)
-
-makeGlyphObject builder vertAttr normAttr colorAttr textureAttr res setup tear = do
-    compiled <- compilingBuilder builder
-    buffer <- createBufferObject ArrayBuffer compiled
-    return $ GlyphObject buffer compiled vertAttr normAttr colorAttr textureAttr res setup tear
-
-glyphObjectPrepare :: GlyphObject a -> (GlyphObject a -> IO()) -> GlyphObject a
-glyphObjectPrepare (GlyphObject a b c d e f g _ i) h = GlyphObject a b c d e f g (Just h) i
-
-glyphObjectTeardown :: GlyphObject a -> (GlyphObject a -> IO()) -> GlyphObject a
-glyphObjectTeardown (GlyphObject a b c d e f g h _) i = GlyphObject a b c d e f g h (Just i)
-
-instance (Show a) => Show (GlyphObject a) where
-    show (GlyphObject _ co vAttr nAttr cAttr tAttr res _ _) =
-        "[GlyphObject compiled=" ++! co ++ " vertAttr=" ++! vAttr ++
-            " normalAttr="++!nAttr++" colorAttr="++!cAttr++" textureAttr="++!tAttr++" res="++!res++"]"
-
-instance Drawable (GlyphObject a) where
-    draw obj@(GlyphObject bo co vAttr nAttr cAttr tAttr _ setup tearDown) = do
-        {- Setup whatever we need for the object to draw itself -}
-        maybe (return ()) (apply obj) setup
-
-        {- Get the array descriptors for the possible
-         - parts -}
-        let vad = vertexArrayDescriptor co
-        let nad = normalArrayDescriptor co
-        let cad = colorArrayDescriptor co
-        let tad = textureArrayDescriptor co
-
-        bindBuffer ArrayBuffer $= Just bo
-        let enabled = catMaybes $
-             map liftMaybe [(Just vAttr,Just vad), (nAttr, nad), (cAttr,cad), (tAttr,tad)]
-
-        forM_ enabled $ \(attr, ad) -> do
-            vertexAttribPointer attr $= (ToFloat, ad)
-            vertexAttribArray attr $= Enabled
-
-        drawArrays Triangles 0 (bufferLength co)
-            
-        forM_ enabled $ \(attr, _) -> do
-            vertexAttribArray attr $= Disabled
-            
-        {- Tear down whatever the object needs -}
-        maybe (return ()) (apply obj) tearDown
-        where liftMaybe t@(Just a, Just b) = Just (a,b)
-              liftMaybe _ = Nothing
-              apply obj f = f obj
 
 data Uniforms = Uniforms {
     dxU :: UniformLocation,
@@ -126,6 +55,12 @@ data TextureData = TextureData {
 data Resources = Resources {
     object :: GlyphObject Uniforms,
     backDrop :: GlyphObject (Program,UniformLocation),
+    satelites :: GlyphObject (Program,
+                    UniformLocation, -- noise
+                    UniformLocation, -- mvMat
+                    UniformLocation, -- pMat
+                    UniformLocation, -- time
+                    UniformLocation), -- light
     moon :: GlyphObject (Program,
                 UniformLocation,
                 UniformLocation,
@@ -170,12 +105,13 @@ enumEq a = (fromEnum a ==) . fromEnum
 enumNeq :: Enum a => a -> a -> Bool
 enumNeq a = not . enumEq a
 
-loadProgram :: String -> String -> IO Program
-loadProgram vert frag = do
-    shaders <- loadShaders [
-        (VertexShader, vert),
-        (FragmentShader, frag) ]
-    mapM_ (putStrLn . fst) shaders
+loadProgram :: String -> String -> Maybe String -> IO Program
+loadProgram vert frag geom = do
+    shaders <- loadShaders $ catMaybes [
+        Just (VertexShader, vert),
+        Just (FragmentShader, frag),
+        geom >>= return . (,)GeometryShader]
+    -- mapM_ (putStrLn . fst) shaders
     (linklog, maybeProg) <- createShaderProgram (workingShaders shaders)
 
     when (isNothing maybeProg) $ do
@@ -228,14 +164,9 @@ circle r step = do
 makeResources :: IO Resources
 makeResources =
         let pMatrix' = perspectiveMatrix 50 1.8 0.1 100 in
-        loadProgram "shaders/normal.vert" "shaders/textured.frag" >>= (\prog -> do
-            glo <- makeGlyphObject
-                    <$> (pure $ circle 1 3)
-                    <*> get (attribLocation prog "in_position")
-                    <*> (get (attribLocation prog "in_normal") >>= return . Just)
-                    <*> pure Nothing
-                    <*> (get (attribLocation prog "in_texMapping") >>= return . Just)
-                    <*> do Uniforms
+        loadProgram "shaders/normal.vert" "shaders/textured.frag" Nothing >>= (\prog -> do
+            glo <- newDefaultGlyphObject (circle 1 3)
+                    <$> do Uniforms
                             <$> get (uniformLocation prog "dX")
                             <*> get (uniformLocation prog "dY")
                             <*> get (uniformLocation prog "texture")
@@ -245,28 +176,15 @@ makeResources =
                             <*> get (uniformLocation prog "lights")
                             <*> get (uniformLocation prog "random")
                             <*> get (uniformLocation prog "winter")
-                    <*> pure Nothing
-                    <*> pure Nothing
                     
             prog2 <- loadBackdropProgram
-            backDrop <- makeGlyphObject
-                            <$> pure quad
-                            <*> get (attribLocation prog "in_position")
-                            <*> pure Nothing
-                            <*> pure Nothing
-                            <*> pure Nothing
-                            <*> (get (uniformLocation prog2 "texture") >>= \x-> return (prog2,x))
-                            <*> pure Nothing
-                            <*> pure Nothing
+            backDrop <- newDefaultGlyphObject quad
+                            <$> (get (uniformLocation prog2 "texture") >>=
+                                    \x-> return (prog2,x))
 
-            moonProg <- loadProgram "shaders/moon.vert" "shaders/moon.frag"
-            moon <- makeGlyphObject
-                    <$> pure (circle 0.2 5)
-                    <*> get (attribLocation moonProg "in_position")
-                    <*> liftM Just (get (attribLocation moonProg "in_normal"))
-                    <*> pure Nothing
-                    <*> liftM Just (get (attribLocation moonProg "in_texMapping"))
-                    <*> do (,,,,,,,)
+            moonProg <- loadProgram "shaders/moon.vert" "shaders/moon.frag" Nothing
+            moon <- newDefaultGlyphObject (circle 0.2 5)
+                    <$> do (,,,,,,,)
                             <$> pure moonProg
                             <*> get (uniformLocation moonProg "texture")
                             <*> get (uniformLocation moonProg "lightPos")
@@ -275,12 +193,28 @@ makeResources =
                             <*> get (uniformLocation moonProg "time")
                             <*> get (uniformLocation moonProg "dX")
                             <*> get (uniformLocation moonProg "dY")
-                    <*> pure Nothing
-                    <*> pure Nothing
+
+            stgen1 <- newStdGen
+            stgen2 <- newStdGen
+            stgen3 <- newStdGen
+            let run = (\(x,y,_)->bTexture2 (1.0/x,1.0/y)) >&> bVertex3
+            satelitesProg <- loadProgram "shaders/satelites.vert" "shaders/satelites.frag" (Just "shaders/satelites.geom")
+            satelites <- newDefaultGlyphObject (do
+                            mapM_ run $
+                                sortWith (\(a,_,_)-> -a) $ take 200000 $ zip3 (randoms stgen1) (randoms stgen2) (randoms stgen3)
+                            )
+                    <$> do (,,,,,)
+                            <$> pure satelitesProg
+                            <*> get (uniformLocation satelitesProg "noiseTexture")
+                            <*> get (uniformLocation satelitesProg "mvMatrix")
+                            <*> get (uniformLocation satelitesProg "pMatrix")
+                            <*> get (uniformLocation satelitesProg "time")
+                            <*> get (uniformLocation satelitesProg "light")
 
             Resources
                 <$> glo
                 <*> backDrop
+                <*> liftM (setPrimitiveMode Points) satelites
                 <*> moon
                 <*> (makeTexture >>= genRandomTexture)
                 <*> (load ("textures/earth.png") >>= textureFromSurface)
@@ -300,7 +234,7 @@ makeResources =
                 <*> pure (0,0,0)
                 <*> pure (20,0.1,0.1)
                 <*> pure False
-                <*> pure 1.0
+                <*> pure 0.1
             )
         
 printErrors :: String -> IO ()
@@ -347,8 +281,8 @@ display surf res = do
     SDL.flip surf
 
     depthFunc $= Nothing
-    draw $ glyphObjectPrepare (backDrop res) $ \obj -> do
-                let (prg,uni) = (resources obj)
+    draw $ prepare (backDrop res) $ \obj -> do
+                let (prg,uni) = (getResources obj)
                 currentProgram $= Just prg
                 setupTexturing (spaceTex res) uni 0
 
@@ -358,11 +292,12 @@ display surf res = do
             where ph' = (floor ph::Int) `mod` 360
     let mvMatrix = lookAtMatrix (Vec3 . toEuclidian $ eyeLocation res) (Vec3 (0,0,0)) up
     
+    blend $= Disabled
     vertexProgramPointSize $= Enabled
-    draw $ glyphObjectPrepare (object res) $ \glo -> do
+    draw $ prepare (object res) $ \glo -> do
                 depthFunc $= Just Less
                 let bumpMap = if useNoise res then resTexture else earthTex
-                let uniforms = resources glo
+                let uniforms = getResources glo
                 let (w,h) = mapT2 fromIntegral (textureSize $ bumpMap res)
                 uniform (dxU uniforms) $= Index1 (1.0/w::GLfloat)
                 uniform (dyU uniforms) $= Index1 (1.0/h::GLfloat)
@@ -376,8 +311,8 @@ display surf res = do
                 setupTexturing (resTexture res) (randomU uniforms) 4
                 setupTexturing (winterTex res) (winterU uniforms) 5
 
-    draw $ glyphObjectPrepare (moon res) $ \glo -> do
-            let (prog, texU, lU, mvMatU, pMatU, timeUn,dxUn,dyUn) = resources glo
+    draw $ prepare (moon res) $ \glo -> do
+            let (prog, texU, lU, mvMatU, pMatU, timeUn,dxUn,dyUn) = getResources glo
             let (w,h) = mapT2 fromIntegral (textureSize $ moonTex res)
             let time = resTime res
             currentProgram $= Just prog
@@ -388,6 +323,18 @@ display surf res = do
             uniform dyUn $= Index1 (1.0/w::GLfloat)
             setupTexturing (moonTex res) texU 0
             setupLighting mvMatrix res lU
+            
+    blend $= Enabled
+    blendFunc $= (GL.SrcAlpha,OneMinusSrcAlpha)
+    draw $ prepare (satelites res) $ \glo -> do
+            let (prog, texU, mvMatU, pMatU, timeUn, light) = getResources glo
+            let time = resTime res
+            currentProgram $= Just prog
+            uniform mvMatU $= mvMatrix
+            uniform pMatU $= pMatrix res
+            uniform timeUn $= Index1 time
+            setupLighting mvMatrix res light
+            setupTexturing (resTexture res) texU 0
 
     SDL.glSwapBuffers
     return res
@@ -430,10 +377,10 @@ digestEvents args = do
             digestEvents $ (Prelude.flip setUseNoise args.not.useNoise) args
 
         KeyDown (Keysym SDLK_EQUALS _ _) ->
-            digestEvents $ setDTime (dTime args + 1.0) args
+            digestEvents $ setDTime (dTime args + 0.1) args
 
         KeyDown (Keysym SDLK_MINUS _ _) ->
-            digestEvents $ setDTime (dTime args - 1.0) args
+            digestEvents $ setDTime (dTime args - 0.1) args
 
         Quit -> exitSuccess
         _ -> digestEvents args

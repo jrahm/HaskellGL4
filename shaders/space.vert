@@ -1,5 +1,6 @@
 #version 150
-in vec3 in_position ;
+#extension GL_ARB_explicit_attrib_location : enable
+layout(location = 0) in vec3 in_position ;
 out vec2 texMap ;
 
 void main() {
